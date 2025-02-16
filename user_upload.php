@@ -1,6 +1,62 @@
 <?php
 class DatabaseUploader
 {
+    private function validateEmail($email)
+    {
+        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+    }
+    public function processCSV($filename)
+    {
+        if (!file_exists($filename)) {
+            echo "Error: File '$filename' does not exist.\n";
+            return false;
+        }
+        $file = fopen($filename, 'r');
+        if (!$file) {
+            echo "Error: Unable to open file '$filename'.\n";
+            return false;
+        }
+        $lineNumber = 0;
+        $successCount = 0;
+        $errorCount = 0;
+        while (($data = fgetcsv($file)) !== FALSE) {
+            $lineNumber++;
+            if (count($data) !== 3) {
+                echo "Error on line $lineNumber: Invalid number of columns.\n";
+                $errorCount++;
+                continue;
+            }
+            $name = ucfirst(strtolower(trim($data[0])));
+            $surname = ucfirst(strtolower(trim($data[1])));
+            $email = strtolower(trim($data[2]));
+            if (!$this->validateEmail($email)) {
+                echo "Error on line $lineNumber: Invalid email format '$email'.\n";
+                $errorCount++;
+                continue;
+            }
+            try {
+                $nextId = $this->dbConnection->query("SELECT COALESCE(MAX(id), 0) + 1 FROM users")->fetchColumn();
+                $sql = "INSERT INTO users (id, name, surname, email) VALUES (?, ?, ?, ?)";
+                $stmt = $this->dbConnection->prepare($sql);
+                $stmt->execute([$nextId, $name, $surname, $email]);
+                $successCount++;
+            } catch (PDOException $e) {
+                if ($e->getCode() == '23505') {
+                    echo "Error on line $lineNumber: Email '$email' already exists.\n";
+                } else {
+                    echo "Error on line $lineNumber: " . $e->getMessage() . "\n";
+                }
+                $errorCount++;
+            }
+        }
+        fclose($file);
+
+        echo "\nProcessing complete:\n";
+        echo "Successful records: $successCount\n";
+        echo "Failed records: $errorCount\n";
+        return true;
+    }
+
     private $dbConnection = null;
     private $host;
     private $username;
@@ -34,9 +90,10 @@ class DatabaseUploader
                         name VARCHAR(100) NOT NULL,
                         surname VARCHAR(100) NOT NULL,
                         email VARCHAR(255) NOT NULL UNIQUE
-                    )";
+                    );
+                    CREATE INDEX idx_email ON users(email);";
             $this->dbConnection->exec($sql);
-            echo "Table 'users' created successfully.\n";
+            echo "Table 'users' created successfully with email index.\n";
             return true;
         } catch (PDOException $e) {
             echo "Error creating table: " . $e->getMessage() . "\n";
@@ -78,4 +135,10 @@ if (isset($options['create_table'])) {
     $uploader->createTable();
     exit(0);
 }
-echo "Script completed.\n";
+// Check if file parameter is provided
+if (!isset($options['file'])) {
+    echo "Error: No input file specified. Use --file option.\n";
+    exit(1);
+}
+// Process the CSV file
+$uploader->processCSV($options['file']);
