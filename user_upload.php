@@ -1,9 +1,18 @@
 <?php
 class DatabaseUploader
 {
+    private $dryRun = false;
+    public function setDryRun($dryRun)
+    {
+        $this->dryRun = $dryRun;
+    }
     private function validateEmail($email)
     {
-        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+        return !empty($email) && strlen($email) <= 255 && filter_var($email, FILTER_VALIDATE_EMAIL);
+    }
+    private function validateName($name)
+    {
+        return !empty($name) && strlen($name) <= 100 && preg_match('/^[a-zA-Z\s\'-]+$/', $name);
     }
     public function processCSV($filename)
     {
@@ -29,24 +38,40 @@ class DatabaseUploader
             $name = ucfirst(strtolower(trim($data[0])));
             $surname = ucfirst(strtolower(trim($data[1])));
             $email = strtolower(trim($data[2]));
+            if (!$this->validateName($name) || !$this->validateName($surname)) {
+                if (!$this->validateName($name) && !$this->validateName($surname)) {
+                    echo "Error on line $lineNumber: Invalid name and surname format ('$name', '$surname').\n";
+                } else if (!$this->validateName($name)) {
+                    echo "Error on line $lineNumber: Invalid name format '$name'.\n";
+                } else {
+                    echo "Error on line $lineNumber: Invalid surname format '$surname'.\n";
+                }
+                $errorCount++;
+                continue;
+            }
             if (!$this->validateEmail($email)) {
                 echo "Error on line $lineNumber: Invalid email format '$email'.\n";
                 $errorCount++;
                 continue;
             }
-            try {
-                $nextId = $this->dbConnection->query("SELECT COALESCE(MAX(id), 0) + 1 FROM users")->fetchColumn();
-                $sql = "INSERT INTO users (id, name, surname, email) VALUES (?, ?, ?, ?)";
-                $stmt = $this->dbConnection->prepare($sql);
-                $stmt->execute([$nextId, $name, $surname, $email]);
-                $successCount++;
-            } catch (PDOException $e) {
-                if ($e->getCode() == '23505') {
-                    echo "Error on line $lineNumber: Email '$email' already exists.\n";
-                } else {
-                    echo "Error on line $lineNumber: " . $e->getMessage() . "\n";
+            if (!$this->dryRun) {
+                try {
+                    $nextId = $this->dbConnection->query("SELECT COALESCE(MAX(id), 0) + 1 FROM users")->fetchColumn();
+                    $sql = "INSERT INTO users (id, name, surname, email) VALUES (?, ?, ?, ?)";
+                    $stmt = $this->dbConnection->prepare($sql);
+                    $stmt->execute([$nextId, $name, $surname, $email]);
+                    $successCount++;
+                } catch (PDOException $e) {
+                    if ($e->getCode() == '23505') {
+                        echo "Error on line $lineNumber: Email '$email' already exists.\n";
+                    } else {
+                        echo "Error on line $lineNumber: " . $e->getMessage() . "\n";
+                    }
+                    $errorCount++;
                 }
-                $errorCount++;
+            } else {
+                echo "DRY RUN: Would insert: $name $surname ($email)\n";
+                $successCount++;
             }
         }
         fclose($file);
@@ -139,6 +164,11 @@ if (isset($options['create_table'])) {
 if (!isset($options['file'])) {
     echo "Error: No input file specified. Use --file option.\n";
     exit(1);
+}
+// Set dry run mode if specified
+if (isset($options['dry_run'])) {
+    $uploader->setDryRun(true);
+    echo "Running in dry run mode - no database changes will be made.\n";
 }
 // Process the CSV file
 $uploader->processCSV($options['file']);
