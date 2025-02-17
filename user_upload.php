@@ -49,20 +49,31 @@ class DatabaseUploader
             $surname = ucfirst(strtolower(trim($data[1])));
             $email = strtolower(trim($data[2]));
 
-            if (!$this->validateName($name) || !$this->validateName($surname)) {
-                if (!$this->validateName($name) && !$this->validateName($surname)) {
-                    echo "Error on line $lineNumber: Invalid name and surname format ('$name', '$surname').\n";
-                } else if (!$this->validateName($name)) {
-                    echo "Error on line $lineNumber: Invalid name format '$name'.\n";
-                } else {
-                    echo "Error on line $lineNumber: Invalid surname format '$surname'.\n";
-                }
-                $errorCount++;
-                continue;
-            }
+            if (!$this->validateName($name) || !$this->validateName($surname) || !$this->validateEmail($email)) {
+                $errors = [];
 
-            if (!$this->validateEmail($email)) {
-                echo "Error on line $lineNumber: Invalid email format '$email'.\n";
+                if (!$this->validateName($name)) {
+                    $errors[] = "name '$name'";
+                }
+                if (!$this->validateName($surname)) {
+                    $errors[] = "surname '$surname'";
+                }
+                if (!$this->validateEmail($email)) {
+                    $errors[] = "email '$email'";
+                }
+
+                $errorMessage = "Error on line $lineNumber: Invalid ";
+
+                if (count($errors) > 2) {
+                    $errorMessage .= implode(", ", array_slice($errors, 0, -1)) . ", and " . end($errors);
+                } else if (count($errors) == 2) {
+                    $errorMessage .= $errors[0] . " and " . $errors[1];
+                } else {
+                    $errorMessage .= $errors[0];
+                }
+
+                echo $errorMessage . " format.\n";
+
                 $errorCount++;
                 continue;
             }
